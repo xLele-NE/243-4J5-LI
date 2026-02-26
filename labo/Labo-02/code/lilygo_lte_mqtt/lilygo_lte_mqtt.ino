@@ -22,7 +22,7 @@
 #define MODEM_TX 26
 #define MODEM_RX 27
 #define MODEM_PWRKEY 4
-#define MODEM_DTR 12
+#define MODEM_DTR 12  // Déplacé sur 12 pour libérer la pin 33 pour la LED Verte
 #define MODEM_RI 13
 #define MODEM_FLIGHT 25
 #define MODEM_STATUS 0
@@ -41,8 +41,21 @@ char BUTTON1_STATE_TOPIC[50];
 char BUTTON2_STATE_TOPIC[50];
 char LED1_SET_TOPIC[50];
 char LED2_SET_TOPIC[50];
+char LED1_STATE_TOPIC[50]; // Nouveau topic d'état
+char LED2_STATE_TOPIC[50]; // Nouveau topic d'état
+
+// --- Variables d'état et Debounce ---
+bool led1State = false;
+bool led2State = false;
+unsigned long lastButton1Press = 0;
+unsigned long lastButton2Press = 0;
+int lastBtn1State = HIGH;
+int lastBtn2State = HIGH;
+const unsigned long DEBOUNCE_DELAY = 200; // 200ms debounce
 
 // --- Configuration des broches (Pins) ---
+// LED1 (Rouge) -> Pin 32
+// LED2 (Verte) -> Pin 33
 const int LED1_PIN = 32;
 const int LED2_PIN = 33;
 const int BUTTON1_PIN = 34;
@@ -163,7 +176,7 @@ public:
     _sslClient->print("Sec-WebSocket-Version: 13\r\n\r\n");
 
     unsigned long timeout = millis();
-    while (!_sslClient->available() && millis() - timeout < 5000) {
+    while (!_sslClient->available() && millis() - timeout < 10000) { // Augmenter à 10s pour LTE
       delay(10);
     }
 
@@ -337,19 +350,27 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   if (strcmp(topic, LED1_SET_TOPIC) == 0) {
     if (msg == "ON") {
       digitalWrite(LED1_PIN, HIGH);
+      led1State = true;  // Sync state
       Serial.println("[LED1] Allumee (ROUGE)");
+      mqttClient.publish(LED1_STATE_TOPIC, "ON"); // Publier état à jour
     } else if (msg == "OFF") {
       digitalWrite(LED1_PIN, LOW);
+      led1State = false; // Sync state
       Serial.println("[LED1] Eteinte");
+      mqttClient.publish(LED1_STATE_TOPIC, "OFF"); // Publier état à jour
     }
   }
   else if (strcmp(topic, LED2_SET_TOPIC) == 0) {
     if (msg == "ON") {
       digitalWrite(LED2_PIN, HIGH);
+      led2State = true;  // Sync state
       Serial.println("[LED2] Allumee (VERTE)");
+      mqttClient.publish(LED2_STATE_TOPIC, "ON"); // Publier état à jour
     } else if (msg == "OFF") {
       digitalWrite(LED2_PIN, LOW);
+      led2State = false; // Sync state
       Serial.println("[LED2] Eteinte");
+      mqttClient.publish(LED2_STATE_TOPIC, "OFF"); // Publier état à jour
     }
   }
 }
@@ -396,6 +417,8 @@ bool initModem() {
   snprintf(LED2_SET_TOPIC, sizeof(LED2_SET_TOPIC), "%s/led/2/set", MQTT_CLIENT_ID);
   snprintf(BUTTON1_STATE_TOPIC, sizeof(BUTTON1_STATE_TOPIC), "%s/button/1/state", MQTT_CLIENT_ID);
   snprintf(BUTTON2_STATE_TOPIC, sizeof(BUTTON2_STATE_TOPIC), "%s/button/2/state", MQTT_CLIENT_ID);
+  snprintf(LED1_STATE_TOPIC, sizeof(LED1_STATE_TOPIC), "%s/led/1/state", MQTT_CLIENT_ID);
+  snprintf(LED2_STATE_TOPIC, sizeof(LED2_STATE_TOPIC), "%s/led/2/state", MQTT_CLIENT_ID);
 
   Serial.println("[MODEM] Initialise");
   return true;
@@ -447,32 +470,53 @@ bool connectToNetwork() {
 }
 
 void checkButtons() {
-  long now = millis();
+  unsigned long now = millis();
 
-  if (now - lastButtonCheck < 100) {
-    return;
+  // --- BOUTON 1 (GPIO 34) ---
+  int currentBtn1 = digitalRead(BUTTON1_PIN);
+  
+  // Détection front descendant (HIGH -> LOW)
+  if (currentBtn1 == LOW && lastBtn1State == HIGH) {
+    if (now - lastButton1Press > DEBOUNCE_DELAY) {
+      lastButton1Press = now;
+      led1State = !led1State; // Toggle
+
+      // Action locale
+      digitalWrite(LED1_PIN, led1State ? HIGH : LOW);
+      Serial.print("[BTN1] Toggle -> ");
+      Serial.println(led1State ? "ON" : "OFF");
+
+      // Action MQTT (si connecté)
+      if (mqttClient.connected()) {
+        const char* state = led1State ? "ON" : "OFF";
+        mqttClient.publish(LED1_STATE_TOPIC, state);
+      }
+    }
   }
-  lastButtonCheck = now;
+  lastBtn1State = currentBtn1; // Mémoriser l'état
 
-  if (!mqttClient.connected()) return;
+  // --- BOUTON 2 (GPIO 35) ---
+  int currentBtn2 = digitalRead(BUTTON2_PIN);
 
-  int button1State = digitalRead(BUTTON1_PIN);
-  if (button1State != lastButton1State) {
-    lastButton1State = button1State;
-    const char* state = (button1State == LOW) ? "PRESSED" : "RELEASED";
-    mqttClient.publish(BUTTON1_STATE_TOPIC, state);
-    Serial.print("[BTN1] -> ");
-    Serial.println(state);
+  // Détection front descendant (HIGH -> LOW)
+  if (currentBtn2 == LOW && lastBtn2State == HIGH) {
+    if (now - lastButton2Press > DEBOUNCE_DELAY) {
+      lastButton2Press = now;
+      led2State = !led2State; // Toggle
+
+      // Action locale
+      digitalWrite(LED2_PIN, led2State ? HIGH : LOW);
+      Serial.print("[BTN2] Toggle -> ");
+      Serial.println(led2State ? "ON" : "OFF");
+
+      // Action MQTT (si connecté)
+      if (mqttClient.connected()) {
+        const char* state = led2State ? "ON" : "OFF";
+        mqttClient.publish(LED2_STATE_TOPIC, state);
+      }
+    }
   }
-
-  int button2State = digitalRead(BUTTON2_PIN);
-  if (button2State != lastButton2State) {
-    lastButton2State = button2State;
-    const char* state = (button2State == LOW) ? "PRESSED" : "RELEASED";
-    mqttClient.publish(BUTTON2_STATE_TOPIC, state);
-    Serial.print("[BTN2] -> ");
-    Serial.println(state);
-  }
+  lastBtn2State = currentBtn2; // Mémoriser l'état
 }
 
 bool reconnectMQTT() {

@@ -78,6 +78,10 @@ class LEDControlUI:
         device_id = mqtt_config.get("device_id", "esp32-XXXX")
         self.led1_topic = f"{device_id}/led/1/set"
         self.led2_topic = f"{device_id}/led/2/set"
+        
+        # Topics d'état pour mise à jour UI depuis boutons physiques
+        self.led1_state_topic = f"{device_id}/led/1/state"
+        self.led2_state_topic = f"{device_id}/led/2/state"
 
         self._init_mqtt()
 
@@ -103,15 +107,16 @@ class LEDControlUI:
                 transport="websockets"
             )
 
-            # Configuration SSL pour WSS
+            # Configuration SSL pour WSS (Insecure pour la démo)
             self.mqtt_client.tls_set(
                 ca_certs=None,
                 certfile=None,
                 keyfile=None,
-                cert_reqs=ssl.CERT_REQUIRED,
+                cert_reqs=ssl.CERT_NONE,
                 tls_version=ssl.PROTOCOL_TLS,
                 ciphers=None
             )
+            self.mqtt_client.tls_insecure_set(True)
 
             # Authentification
             username = self.mqtt_config.get("username", "esp_user")
@@ -144,12 +149,9 @@ class LEDControlUI:
             self.status_message = "MQTT connecté!"
             self._add_feedback("✓ Connecté au broker MQTT")
 
-            # S'abonner aux topics de statut des boutons (optionnel)
-            device_id = self.mqtt_config.get("device_id", "esp32-XXXX")
-            button1_topic = f"{device_id}/button/1/state"
-            button2_topic = f"{device_id}/button/2/state"
-            client.subscribe(button1_topic)
-            client.subscribe(button2_topic)
+            # S'abonner aux topics de statut des boutons et des LEDs (pour mise à jour via bouton physique)
+            client.subscribe(self.led1_state_topic)
+            client.subscribe(self.led2_state_topic)
 
         else:
             self.mqtt_connected = False
@@ -176,6 +178,18 @@ class LEDControlUI:
         topic = msg.topic
         payload = msg.payload.decode('utf-8', errors='ignore')
         self._add_feedback(f"← {topic}: {payload}")
+
+        # Si l'état change physiquement, mettre à jour l'UI
+        if topic == self.led1_state_topic:
+            if payload == "ON":
+                self.led1_state = True
+            elif payload == "OFF":
+                self.led1_state = False
+        elif topic == self.led2_state_topic:
+            if payload == "ON":
+                self.led2_state = True
+            elif payload == "OFF":
+                self.led2_state = False
 
     def _add_feedback(self, message):
         """Ajoute un message au buffer de feedback"""
@@ -260,16 +274,17 @@ class LEDControlUI:
 
     def _init_colors(self):
         curses.start_color()
-        curses.use_default_colors()
-        curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_YELLOW)   # bouton QUIT (jaune vif)
+        # On définit MAGENTA comme fond pour donner un effet "Rose"
+        curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_YELLOW)   # bouton QUIT
         curses.init_pair(2, curses.COLOR_BLACK, curses.COLOR_GREEN)    # bouton actif
-        curses.init_pair(3, curses.COLOR_BLACK, curses.COLOR_YELLOW)   # texte status (jaune sur noir)
-        curses.init_pair(4, curses.COLOR_YELLOW, curses.COLOR_RED)     # LED ROUGE ON (jaune sur rouge)
-        curses.init_pair(5, curses.COLOR_BLACK, curses.COLOR_GREEN)    # LED VERTE ON (noir sur vert)
-        curses.init_pair(6, curses.COLOR_YELLOW, curses.COLOR_BLUE)    # LED ROUGE OFF (jaune sur bleu foncé)
-        curses.init_pair(7, curses.COLOR_WHITE, curses.COLOR_BLUE)     # LED VERTE OFF (blanc sur bleu foncé)
-        curses.init_pair(8, curses.COLOR_WHITE, curses.COLOR_BLACK)    # Bordures blanches sur noir
-        curses.init_pair(9, curses.COLOR_BLACK, curses.COLOR_CYAN)     # Titre (noir sur cyan)
+        curses.init_pair(3, curses.COLOR_WHITE, curses.COLOR_MAGENTA)  # texte status
+        curses.init_pair(4, curses.COLOR_WHITE, curses.COLOR_RED)      # LED ROUGE ON (Blanc sur Rouge)
+        curses.init_pair(5, curses.COLOR_WHITE, curses.COLOR_GREEN)    # LED VERTE ON (Blanc sur Vert)
+        curses.init_pair(6, curses.COLOR_BLACK, curses.COLOR_RED)      # LED ROUGE OFF (Noir sur Rouge)
+        curses.init_pair(7, curses.COLOR_BLACK, curses.COLOR_GREEN)    # LED VERTE OFF (Noir sur Vert)
+        curses.init_pair(8, curses.COLOR_WHITE, curses.COLOR_MAGENTA)  # Bordures
+        curses.init_pair(9, curses.COLOR_BLACK, curses.COLOR_CYAN)     # Titre
+        curses.init_pair(10, curses.COLOR_WHITE, curses.COLOR_MAGENTA) # Paire pour le fond global (ROSE)
 
     def _build_buttons(self, h, w):
         """
@@ -289,7 +304,7 @@ class LEDControlUI:
         buttons_config = [
             {
                 "name": "LED1",
-                "label": "LED ROUGE",
+                "label": "LED ROUGE (P32)",
                 "state_attr": "led1_state",
                 "topic": self.led1_topic,
                 "color_on": 4,   # Rouge
@@ -297,7 +312,7 @@ class LEDControlUI:
             },
             {
                 "name": "LED2",
-                "label": "LED VERTE",
+                "label": "LED VERTE (P33)",
                 "state_attr": "led2_state",
                 "topic": self.led2_topic,
                 "color_on": 5,   # Vert
@@ -331,6 +346,8 @@ class LEDControlUI:
             })
 
     def _draw(self):
+        # Appliquer le fond ROSE (Magenta en curses)
+        self.stdscr.bkgd(' ', curses.color_pair(10))
         self.stdscr.erase()
         h, w = self.stdscr.getmaxyx()
 
