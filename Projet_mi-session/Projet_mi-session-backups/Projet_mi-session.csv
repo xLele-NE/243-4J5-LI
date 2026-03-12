@@ -1,0 +1,10 @@
+"Id";"Référence";"Empreinte";"Quantité";"Désignation";"Fournisseur et réf";
+1;"R4,R6,R5";"R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal";3;"1k";;;
+2;"J2,J1";"PinHeader_1x16_P2.54mm_Vertical";2;"Conn_01x16";;;
+3;"R1,R3,R2";"R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal";3;"330";;;
+4;"SW2,SW1,SW3";"SW_B3WN-6002";3;"SW_Push";;;
+5;"RV1";"Potentiometer_Bourns_3386P_Vertical";1;"Pot";;;
+6;"J4,J3";"PinHeader_1x06_P2.54mm_Vertical";2;"Conn_01x06";;;
+7;"D3";"LED_D5.0mm_Clear";1;"LED_B";;;
+8;"D2";"LED_D5.0mm_Clear";1;"LED_V";;;
+9;"D1";"LED_D5.0mm_Clear";1;"LED_R";;;
