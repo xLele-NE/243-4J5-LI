@@ -1,0 +1,48 @@
+// auth.h - Configuration WiFi et MQTT
+#ifndef AUTH_H
+#define AUTH_H
+
+// ============================================================================
+// CONFIGURATION WiFi - CHOISIR UN SEUL TYPE DE SÉCURITÉ
+// ============================================================================
+
+// --- Option 1: WPA2-Personal (réseau domestique) ---
+// Décommentez la ligne suivante pour un réseau WiFi avec mot de passe simple
+#define WIFI_SECURITY_WPA2_PERSONAL
+
+// --- Option 2: WPA2-Enterprise (réseau du Cégep, entreprise) ---
+// Décommentez la ligne suivante pour un réseau avec authentification par identifiant
+// #define WIFI_SECURITY_WPA2_ENTERPRISE
+
+// ============================================================================
+// CONFIGURATION WiFi - WPA2-Personal
+// ============================================================================
+// À utiliser avec WIFI_SECURITY_WPA2_PERSONAL
+
+const char* WIFI_SSID = "VotreReseauWiFi";          // Nom du réseau WiFi
+const char* WIFI_PASSWORD = "VotreMotDePasse";      // Mot de passe WiFi
+
+// ============================================================================
+// CONFIGURATION WiFi - WPA2-Enterprise (EAP-PEAP MSCHAPv2)
+// ============================================================================
+// À utiliser avec WIFI_SECURITY_WPA2_ENTERPRISE
+// Pour les réseaux d'entreprise ou du Cégep
+
+const char* EAP_IDENTITY = "votre_identifiant";     // Identité externe
+const char* EAP_USERNAME = "votre_identifiant";     // Nom d'utilisateur
+const char* EAP_PASSWORD = "votre_mot_de_passe";    // Mot de passe
+
+// ============================================================================
+// CONFIGURATION MQTT
+// ============================================================================
+
+const char* MQTT_BROKER = "mqtt.edxo.ca";           // Adresse du broker MQTT
+const char* MQTT_USER = "esp_user";                 // Utilisateur MQTT
+const char* MQTT_PASS = "YOUR_PASSWORD_HERE";       // Mot de passe MQTT (à remplacer)
+
+// Device ID - Généré automatiquement à partir de l'adresse MAC
+// Format final: "esp32-XXXXXX" (6 derniers caractères de la MAC)
+// Cette valeur sera affichée au démarrage dans le moniteur série
+const char* MQTT_CLIENT_ID = "esp32-auto";          // Laissez "esp32-auto" ou personnalisez
+
+#endif // AUTH_H
