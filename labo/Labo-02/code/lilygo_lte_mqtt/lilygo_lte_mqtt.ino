@@ -6,6 +6,9 @@
 
 #include <TinyGsmClient.h>
 #include <PubSubClient.h>
+#include <Wire.h>
+#include <Adafruit_Sensor.h>
+#include <Adafruit_MPU6050.h>
 
 // ESP_SSLClient configuration
 #define ENABLE_DEBUG
@@ -22,15 +25,15 @@
 #define MODEM_TX 26
 #define MODEM_RX 27
 #define MODEM_PWRKEY 4
-#define MODEM_DTR 12  // Déplacé sur 12 pour libérer la pin 33 pour la LED Verte
-#define MODEM_RI 13
+#define MODEM_DTR 32 // Déplacé de 21 à 32 pour libérer SDA
+#define MODEM_RI 34
 #define MODEM_FLIGHT 25
-#define MODEM_STATUS 0
+#define MODEM_STATUS 35
 
 #define SD_MISO 2
 #define SD_MOSI 15
-#define SD_SCLK 14
-#define SD_CS 13
+#define SD_SCLK 4
+#define SD_CS 5
 
 // ====== CONFIG MQTT/WSS ======
 const char* MQTT_HOST = MQTT_BROKER;
@@ -41,25 +44,60 @@ char BUTTON1_STATE_TOPIC[50];
 char BUTTON2_STATE_TOPIC[50];
 char LED1_SET_TOPIC[50];
 char LED2_SET_TOPIC[50];
-char LED1_STATE_TOPIC[50]; // Nouveau topic d'état
-char LED2_STATE_TOPIC[50]; // Nouveau topic d'état
+char LED3_SET_TOPIC[50];
+char LED1_STATE_TOPIC[50];
+char LED2_STATE_TOPIC[50];
+char LED3_STATE_TOPIC[50];
+char POT_STATE_TOPIC[50];
 
 // --- Variables d'état et Debounce ---
 bool led1State = false;
 bool led2State = false;
+bool led3State = false;
 unsigned long lastButton1Press = 0;
 unsigned long lastButton2Press = 0;
+unsigned long lastButton3Press = 0;
 int lastBtn1State = HIGH;
 int lastBtn2State = HIGH;
+int lastBtn3State = HIGH;
 const unsigned long DEBOUNCE_DELAY = 200; // 200ms debounce
 
+int lastPotPercent = -1;
+unsigned long lastPotReadTime = 0;
+
 // --- Configuration des broches (Pins) ---
-// LED1 (Rouge) -> Pin 32
+// LED1 (Rouge) -> Pin 25
 // LED2 (Verte) -> Pin 33
-const int LED1_PIN = 32;
+// LED3 (Bleue) -> Pin 12
+const int LED1_PIN = 25;
 const int LED2_PIN = 33;
-const int BUTTON1_PIN = 34;
-const int BUTTON2_PIN = 35;
+const int LED3_PIN = 12;
+const int BUTTON1_PIN = 36;
+const int BUTTON2_PIN = 39;
+const int BUTTON3_PIN = 32;
+const int POT_PIN = 34;
+const int I2C_SDA = 21;
+const int I2C_SCL = 22;
+
+char ACCEL_STATE_TOPIC[50];
+char SIMON_STATUS_TOPIC[50];
+char SIMON_SCORE_TOPIC[50];
+char SIMON_START_TOPIC[50];
+char SIMON_LEVEL_TOPIC[50];
+
+// --- Logique Simon Game (avec niveaux) ---
+enum GameState { IDLE, PLAYING_SEQUENCE, WAIT_USER, NEXT_LEVEL, BRAVO };
+GameState currentGameState = IDLE;
+int simonOrder[20];  // Max 20 LEDs dans la séquence
+int simonLength = 0;  // Nombre actuel de LEDs dans la séquence
+int simonLevel = 1;   // Niveau actuel
+int stepIndex = 0;
+unsigned long lastGameAction = 0;
+
+String lastOrientation = "none";
+unsigned long lastAccelReadTime = 0;
+
+Adafruit_MPU6050 mpu;
 
 // Serial pour le modem
 HardwareSerial SerialAT(1);
@@ -336,10 +374,41 @@ const unsigned long GPRS_CHECK_INTERVAL = 30000;
 // CALLBACK MQTT
 // ============================================================================
 
+void startSimonGame() {
+  simonLevel = 1;
+  simonLength = 3;
+  // Générer les 3 premières LEDs aléatoires
+  for (int i = 0; i < 20; i++) {
+    simonOrder[i] = random(1, 4); // 1=Rouge, 2=Vert, 3=Bleu
+  }
+  stepIndex = 0;
+  currentGameState = PLAYING_SEQUENCE;
+  char lvlStr[10];
+  itoa(simonLevel, lvlStr, 10);
+  mqttClient.publish(SIMON_LEVEL_TOPIC, lvlStr);
+  mqttClient.publish(SIMON_STATUS_TOPIC, "ECOUTEZ");
+  lastGameAction = millis();
+}
+
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
   String msg = "";
   for (unsigned int i = 0; i < length; i++) {
     msg += (char)payload[i];
+  }
+
+  if (strcmp(topic, SIMON_START_TOPIC) == 0) {
+    if (msg == "STOP") {
+      currentGameState = IDLE;
+      digitalWrite(LED1_PIN, LOW);
+      digitalWrite(LED2_PIN, LOW);
+      digitalWrite(LED3_PIN, LOW);
+      mqttClient.publish(SIMON_STATUS_TOPIC, "IDLE");
+      Serial.println("[GAME] Simon arrêté");
+    } else {
+      Serial.println("[GAME] Start Simon!");
+      startSimonGame();
+    }
+    return;
   }
 
   Serial.print("[MQTT] <- ");
@@ -371,6 +440,19 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
       led2State = false; // Sync state
       Serial.println("[LED2] Eteinte");
       mqttClient.publish(LED2_STATE_TOPIC, "OFF"); // Publier état à jour
+    }
+  }
+  else if (strcmp(topic, LED3_SET_TOPIC) == 0) {
+    if (msg == "ON") {
+      digitalWrite(LED3_PIN, HIGH);
+      led3State = true;  // Sync state
+      Serial.println("[LED3] Allumee (BLEUE)");
+      mqttClient.publish(LED3_STATE_TOPIC, "ON"); // Publier état à jour
+    } else if (msg == "OFF") {
+      digitalWrite(LED3_PIN, LOW);
+      led3State = false; // Sync state
+      Serial.println("[LED3] Eteinte");
+      mqttClient.publish(LED3_STATE_TOPIC, "OFF"); // Publier état à jour
     }
   }
 }
@@ -415,10 +497,18 @@ bool initModem() {
 
   snprintf(LED1_SET_TOPIC, sizeof(LED1_SET_TOPIC), "%s/led/1/set", MQTT_CLIENT_ID);
   snprintf(LED2_SET_TOPIC, sizeof(LED2_SET_TOPIC), "%s/led/2/set", MQTT_CLIENT_ID);
+  snprintf(LED3_SET_TOPIC, sizeof(LED3_SET_TOPIC), "%s/led/3/set", MQTT_CLIENT_ID);
   snprintf(BUTTON1_STATE_TOPIC, sizeof(BUTTON1_STATE_TOPIC), "%s/button/1/state", MQTT_CLIENT_ID);
   snprintf(BUTTON2_STATE_TOPIC, sizeof(BUTTON2_STATE_TOPIC), "%s/button/2/state", MQTT_CLIENT_ID);
   snprintf(LED1_STATE_TOPIC, sizeof(LED1_STATE_TOPIC), "%s/led/1/state", MQTT_CLIENT_ID);
   snprintf(LED2_STATE_TOPIC, sizeof(LED2_STATE_TOPIC), "%s/led/2/state", MQTT_CLIENT_ID);
+  snprintf(LED3_STATE_TOPIC, sizeof(LED3_STATE_TOPIC), "%s/led/3/state", MQTT_CLIENT_ID);
+  snprintf(POT_STATE_TOPIC, sizeof(POT_STATE_TOPIC), "%s/potentiometer/state", MQTT_CLIENT_ID);
+  snprintf(ACCEL_STATE_TOPIC, sizeof(ACCEL_STATE_TOPIC), "%s/accelerometer/orientation", MQTT_CLIENT_ID);
+  snprintf(SIMON_STATUS_TOPIC, sizeof(SIMON_STATUS_TOPIC), "%s/simon/status", MQTT_CLIENT_ID);
+  snprintf(SIMON_SCORE_TOPIC, sizeof(SIMON_SCORE_TOPIC), "%s/simon/score", MQTT_CLIENT_ID);
+  snprintf(SIMON_START_TOPIC, sizeof(SIMON_START_TOPIC), "%s/simon/start", MQTT_CLIENT_ID);
+  snprintf(SIMON_LEVEL_TOPIC, sizeof(SIMON_LEVEL_TOPIC), "%s/simon/level", MQTT_CLIENT_ID);
 
   Serial.println("[MODEM] Initialise");
   return true;
@@ -472,7 +562,7 @@ bool connectToNetwork() {
 void checkButtons() {
   unsigned long now = millis();
 
-  // --- BOUTON 1 (GPIO 34) ---
+  // --- BOUTON 1 (GPIO 36) ---
   int currentBtn1 = digitalRead(BUTTON1_PIN);
   
   // Détection front descendant (HIGH -> LOW)
@@ -517,6 +607,83 @@ void checkButtons() {
     }
   }
   lastBtn2State = currentBtn2; // Mémoriser l'état
+
+  // --- BOUTON 3 (GPIO 39) ---
+  int currentBtn3 = digitalRead(BUTTON3_PIN);
+
+  // Détection front descendant (HIGH -> LOW)
+  if (currentBtn3 == LOW && lastBtn3State == HIGH) {
+    if (now - lastButton3Press > DEBOUNCE_DELAY) {
+      lastButton3Press = now;
+      led3State = !led3State; // Toggle
+
+      // Action locale
+      digitalWrite(LED3_PIN, led3State ? HIGH : LOW);
+      Serial.print("[BTN3] Toggle -> ");
+      Serial.println(led3State ? "ON" : "OFF");
+
+      // Action MQTT (si connecté)
+      if (mqttClient.connected()) {
+        const char* state = led3State ? "ON" : "OFF";
+        mqttClient.publish(LED3_STATE_TOPIC, state);
+      }
+    }
+  }
+  lastBtn3State = currentBtn3; // Mémoriser l'état
+}
+
+void checkPotentiometer() {
+  unsigned long now = millis();
+  if (now - lastPotReadTime > 50) { // Read every 50ms for near real-time reaction
+    lastPotReadTime = now;
+    int potValue = analogRead(POT_PIN);
+    // ESP32 ADC is 12-bit (0-4095)
+    int potPercent = map(potValue, 0, 4095, 0, 100);
+    // Reduced hysteresis to 1% to make it very responsive
+    if (abs(potPercent - lastPotPercent) >= 1 || lastPotPercent == -1) {
+      lastPotPercent = potPercent;
+      char potStr[10];
+      itoa(potPercent, potStr, 10);
+      
+      // Action MQTT (si connecté)
+      if (mqttClient.connected()) {
+        mqttClient.publish(POT_STATE_TOPIC, potStr);
+      }
+    }
+  }
+}
+
+void checkAccelerometer() {
+  unsigned long now = millis();
+  if (now - lastAccelReadTime > 800) { // Every 800ms
+    lastAccelReadTime = now;
+    
+    sensors_event_t a, g, temp;
+    if (mpu.getEvent(&a, &g, &temp)) {
+      String currentOrientation = "flat";
+      float absX = abs(a.acceleration.x);
+      float absY = abs(a.acceleration.y);
+
+      // Seuil élevé (8.0) pour ne déclencher qu'à environ 90 degrés
+      if (absX > absY && absX > 8.0) {
+        currentOrientation = (a.acceleration.x > 0) ? "vertical_left" : "vertical_right";
+      } else if (absY > 8.0) {
+        currentOrientation = (a.acceleration.y > 0) ? "horizontal_up" : "horizontal_down";
+      } else {
+        currentOrientation = "flat";
+      }
+
+      if (currentOrientation != lastOrientation) {
+        lastOrientation = currentOrientation;
+        Serial.print(">>> ORIENTATION: ");
+        Serial.println(currentOrientation);
+
+        if (mqttClient.connected()) {
+          mqttClient.publish(ACCEL_STATE_TOPIC, currentOrientation.c_str());
+        }
+      }
+    }
+  }
 }
 
 bool reconnectMQTT() {
@@ -527,6 +694,8 @@ bool reconnectMQTT() {
 
     mqttClient.subscribe(LED1_SET_TOPIC);
     mqttClient.subscribe(LED2_SET_TOPIC);
+    mqttClient.subscribe(LED3_SET_TOPIC);
+    mqttClient.subscribe(SIMON_START_TOPIC); // Simon Start subscription
     Serial.println("[MQTT] Souscriptions envoyees");
 
     return true;
@@ -551,11 +720,41 @@ void setup() {
 
   pinMode(LED1_PIN, OUTPUT);
   pinMode(LED2_PIN, OUTPUT);
-  pinMode(BUTTON1_PIN, INPUT_PULLUP);
-  pinMode(BUTTON2_PIN, INPUT_PULLUP);
+  pinMode(LED3_PIN, OUTPUT);
+  pinMode(BUTTON1_PIN, INPUT); // Utilisation d'un pull-up externe
+  pinMode(BUTTON2_PIN, INPUT); // Utilisation d'un pull-up externe
+  pinMode(BUTTON3_PIN, INPUT); // Utilisation d'un pull-up externe
 
   digitalWrite(LED1_PIN, LOW);
   digitalWrite(LED2_PIN, LOW);
+  digitalWrite(LED3_PIN, LOW);
+
+  Wire.begin(I2C_SDA, I2C_SCL);
+  Wire.setClock(100000); 
+  
+  Serial.println("[I2C] Scan en cours...");
+  byte error, address;
+  int nDevices = 0;
+  for(address = 1; address < 127; address++) {
+    Wire.beginTransmission(address);
+    error = Wire.endTransmission();
+    if (error == 0) {
+      Serial.print("[I2C] Appareil trouve a l'adresse 0x");
+      if (address < 16) Serial.print("0");
+      Serial.println(address, HEX);
+      nDevices++;
+    }
+  }
+  if (nDevices == 0) Serial.println("[I2C] Aucun appareil trouve!");
+
+  if (!mpu.begin()) {
+    Serial.println("[ERREUR] MPU6050 non detecte");
+  } else {
+    mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
+    mpu.setGyroRange(MPU6050_RANGE_500_DEG);
+    mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
+    Serial.println("[OK] MPU6050 detecte et initialise");
+  }
 
   modemPowerOn();
 
@@ -622,6 +821,103 @@ void setup() {
 // LOOP
 // ============================================================================
 
+int lastSimonBtn1 = HIGH;
+int lastSimonBtn2 = HIGH;
+int lastSimonBtn3 = HIGH;
+
+void updateSimonGame() {
+  if (currentGameState == IDLE) return;
+
+  // --- Afficher le niveau pendant 1.5 secondes avant de montrer la séquence ---
+  if (currentGameState == NEXT_LEVEL) {
+    char lvlStr[10];
+    itoa(simonLevel, lvlStr, 10);
+    mqttClient.publish(SIMON_LEVEL_TOPIC, lvlStr);
+    char statusMsg[30];
+    snprintf(statusMsg, sizeof(statusMsg), "LVL %d", simonLevel);
+    mqttClient.publish(SIMON_STATUS_TOPIC, statusMsg);
+    delay(1500);
+    currentGameState = PLAYING_SEQUENCE;
+  }
+
+  // --- Phase 1 : Montrer la séquence ---
+  if (currentGameState == PLAYING_SEQUENCE) {
+    mqttClient.publish(SIMON_STATUS_TOPIC, "ECOUTEZ");
+    delay(500);
+    for (int i = 0; i < simonLength; i++) {
+      int pin = (simonOrder[i] == 1) ? LED1_PIN : (simonOrder[i] == 2) ? LED2_PIN : LED3_PIN;
+      digitalWrite(pin, HIGH);
+      delay(600);
+      digitalWrite(pin, LOW);
+      delay(350);
+    }
+    stepIndex = 0;
+    currentGameState = WAIT_USER;
+    mqttClient.publish(SIMON_STATUS_TOPIC, "YOUR TURN");
+    lastGameAction = millis();
+    lastSimonBtn1 = digitalRead(BUTTON1_PIN);
+    lastSimonBtn2 = digitalRead(BUTTON2_PIN);
+    lastSimonBtn3 = digitalRead(BUTTON3_PIN);
+  }
+
+  // --- Phase 2 : Attendre les appuis ---
+  if (currentGameState == WAIT_USER) {
+    int currentB1 = digitalRead(BUTTON1_PIN);
+    int currentB2 = digitalRead(BUTTON2_PIN);
+    int currentB3 = digitalRead(BUTTON3_PIN);
+
+    int pressed = 0;
+    if (currentB1 == LOW && lastSimonBtn1 == HIGH) pressed = 1;
+    else if (currentB2 == LOW && lastSimonBtn2 == HIGH) pressed = 2;
+    else if (currentB3 == LOW && lastSimonBtn3 == HIGH) pressed = 3;
+
+    lastSimonBtn1 = currentB1;
+    lastSimonBtn2 = currentB2;
+    lastSimonBtn3 = currentB3;
+
+    if (pressed > 0) {
+      int pin = (pressed == 1) ? LED1_PIN : (pressed == 2) ? LED2_PIN : LED3_PIN;
+      digitalWrite(pin, HIGH);
+      delay(300);
+      digitalWrite(pin, LOW);
+
+      if (pressed == simonOrder[stepIndex]) {
+        stepIndex++;
+        if (stepIndex >= simonLength) {
+          // Niveau réussi !
+          simonLevel++;
+          simonLength++; // Ajouter une LED de plus
+          currentGameState = NEXT_LEVEL;
+          Serial.print("[SIMON] Niveau ");
+          Serial.print(simonLevel - 1);
+          Serial.println(" réussi !");
+        }
+      } else {
+        // PERDU
+        for (int i = 0; i < 4; i++) {
+          digitalWrite(LED1_PIN, HIGH); digitalWrite(LED2_PIN, HIGH); digitalWrite(LED3_PIN, HIGH);
+          delay(200);
+          digitalWrite(LED1_PIN, LOW); digitalWrite(LED2_PIN, LOW); digitalWrite(LED3_PIN, LOW);
+          delay(200);
+        }
+        currentGameState = IDLE;
+        mqttClient.publish(SIMON_STATUS_TOPIC, "PERDU");
+        Serial.println("[SIMON] PERDU");
+      }
+    }
+  }
+
+  if (currentGameState == BRAVO) {
+    // Animation de victoire
+    for (int i = 0; i < 3; i++) {
+      digitalWrite(LED1_PIN, HIGH); delay(150); digitalWrite(LED1_PIN, LOW);
+      digitalWrite(LED2_PIN, HIGH); delay(150); digitalWrite(LED2_PIN, LOW);
+      digitalWrite(LED3_PIN, HIGH); delay(150); digitalWrite(LED3_PIN, LOW);
+    }
+    currentGameState = IDLE;
+  }
+}
+
 void loop() {
   unsigned long now = millis();
 
@@ -647,8 +943,20 @@ void loop() {
 
   mqttClient.loop();
 
-  // Vérifier les boutons
-  checkButtons();
+  // Mettre à jour le jeu Simon
+  updateSimonGame();
+
+  // Ne lire les boutons/pot/accel que si le jeu n'est pas en cours
+  if (currentGameState == IDLE) {
+    // Vérifier les boutons
+    checkButtons();
+
+    // Vérifier le potentiomètre
+    checkPotentiometer();
+
+    // Vérifier l'accéléromètre
+    checkAccelerometer();
+  }
 
   delay(10);
 }
