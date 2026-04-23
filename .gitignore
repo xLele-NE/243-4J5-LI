@@ -30,3 +30,12 @@ ENV/
 Thumbs.db
 /theorie/node_modules
 theorie/pnpm-lock.yaml
+Labo4/projet_Tx/llm_t_beam_supreme_TX_test/
+Labo4/projet_Tx/llm_t_beam_supreme/
+Labo4/projet_Rx/llm_t_beam_supreme_testRx_avec-API/
+Labo4/projet_Rx/llm_t_beam_supreme_testRx/
+Labo4/projet_Rx/llm_t_beam_supreme_testRx-finale/
+Labo4/projet_Rx/llm_t_beam_supreme_Rx_finale-mqtt/
+Labo4/projet_Rx/llm_t_beam_supreme/
+Labo4/projet-test/llm_t_beam_supreme/
+Labo4/llm-t-beam-supreme/
