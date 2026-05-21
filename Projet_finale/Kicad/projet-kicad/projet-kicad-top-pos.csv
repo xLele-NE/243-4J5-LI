@@ -1,0 +1,12 @@
+Ref,Val,Package,PosX,PosY,Rot,Side
+"D1","LED","LED_0805_2012Metric",93.000000,-86.500000,0.000000,top
+"J1","Conn_01x13","PinHeader_1x13_P2.54mm_Vertical",113.500000,-64.380000,0.000000,top
+"J2","Conn_01x13","PinHeader_1x13_P2.54mm_Vertical",118.000000,-64.340000,0.000000,top
+"J3","BH1750","PinHeader_1x03_P2.54mm_Vertical",85.500000,-97.500000,0.000000,top
+"J4","EKMC4607112K","PinHeader_1x05_P2.54mm_Vertical",92.380000,-56.000000,90.000000,top
+"J5","Conn_01x13","PinHeader_1x13_P2.54mm_Vertical",144.000000,-59.840000,0.000000,top
+"J6","Conn_01x13","PinHeader_1x13_P2.54mm_Vertical",148.500000,-59.880000,0.000000,top
+"R1","330","R_0805_2012Metric",101.500000,-86.500000,0.000000,top
+"R2","330","R_0805_2012Metric",132.500000,-79.500000,180.000000,top
+"RV1","POT","Potentiometer_Bourns_3386P_Vertical",79.460000,-78.540000,0.000000,top
+"SW1","SW_DPST_x2","PinHeader_1x02_P2.54mm_Horizontal",131.115000,-102.225000,0.000000,top

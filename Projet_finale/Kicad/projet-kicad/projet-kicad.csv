@@ -1,0 +1,8 @@
+"Id";"Référence";"Empreinte";"Quantité";"Désignation";"Fournisseur et réf";
+1;"J2,J6,J5,J1";"PinHeader_1x13_P2.54mm_Vertical";4;"Conn_01x13";;;
+2;"SW1";"PinHeader_1x02_P2.54mm_Horizontal";1;"SW_DPST_x2";;;
+3;"RV1";"Potentiometer_Bourns_3386P_Vertical";1;"POT";;;
+4;"R2,R1";"R_0805_2012Metric";2;"330";;;
+5;"J4";"PinHeader_1x05_P2.54mm_Vertical";1;"EKMC4607112K";;;
+6;"J3";"PinHeader_1x03_P2.54mm_Vertical";1;"BH1750";;;
+7;"D1";"LED_0805_2012Metric";1;"LED";;;
